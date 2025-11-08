@@ -1,0 +1,99 @@
+service: devinsights-api
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: ap-south-1
+  stage: ${opt:stage, 'dev'}
+  memorySize: 1024
+  timeout: 30
+  
+  environment:
+    GITHUB_TOKEN: ${.env:GITHUB_TOKEN}
+    NODE_ENV: ${opt:stage, 'dev'}
+    UPSTASH_REDIS_REST_URL: ${.env:UPSTASH_REDIS_REST_URL}
+    UPSTASH_REDIS_REST_TOKEN: ${.env:UPSTASH_REDIS_REST_TOKEN}
+  
+  httpApi:
+    cors:
+      allowedOrigins:
+        - http://localhost:3000
+        - http://localhost:3001
+        - https://*
+      allowedHeaders:
+        - Content-Type
+        - Authorization
+      allowedMethods:
+        - GET
+        - POST
+        - OPTIONS
+      allowCredentials: true
+
+functions:
+  healthCheck:
+    handler: handlers/github.healthCheck
+    events:
+      - httpApi:
+          path: /api/health
+          method: get
+
+  getUserRepos:
+    handler: handlers/github.getUserRepositories
+    events:
+      - httpApi:
+          path: /api/github/repos/{username}
+          method: get
+    
+  getRepoCommits:
+    handler: handlers/github.getRepositoriesCommits
+    events:
+      - httpApi:
+          path: /api/github/repos/{owner}/{repo}/commits
+          method: get
+
+  getRepoPulls:
+    handler: handlers/github.getRepositoriesPullRequest
+    events:
+      - httpApi:
+          path: /api/github/repos/{owner}/{repo}/pulls
+          method: get
+
+  getRepoIssues:
+    handler: handlers/github.getRepositoryIssues
+    events:
+      - httpApi:
+          path: /api/github/repos/{owner}/{repo}/issues
+          method: get
+
+  getDashboard:
+    handler: handlers/github.getDashBoardAnalytics
+    timeout: 60
+    memorySize: 2048
+    events:
+      - httpApi:
+          path: /api/github/analytics/{username}
+          method: get
+
+plugins:
+  - serverless-offline
+  - serverless-dotenv-plugin
+
+# 🔥 CRITICAL: Package configuration (THIS WAS MISSING!)
+package:
+  patterns:
+    # Include everything needed
+    - 'handlers/**'
+    - 'services/**'
+    - 'utils/**'
+    - 'node_modules/**'  # 🚨 MUST include node_modules!
+    - 'package.json'
+    
+    # Exclude unnecessary files
+    - '!.git/**'
+    - '!.env'
+    - '!.env.*'
+    - '!README.md'
+    - '!.gitignore'
+    - '!.serverless/**'
+    - '!test/**'
+    - '!*.log'

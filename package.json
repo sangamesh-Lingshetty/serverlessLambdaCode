@@ -1,0 +1,33 @@
+{
+  "name": "devinsights-serverless",
+  "version": "1.0.0",
+  "description": "DevInsights GitHub Analytics API - AWS Lambda",
+  "main": "handlers/github.js",
+  "scripts": {
+    "offline": "serverless offline",
+    "deploy": "serverless deploy",
+    "deploy:dev": "serverless deploy --stage dev",
+    "deploy:prod": "serverless deploy --stage prod",
+    "deploy:function": "serverless deploy function -f",
+    "logs": "serverless logs -f getUserRepos -t",
+    "remove": "serverless remove",
+    "info": "serverless info",
+    "test:local": "serverless invoke local -f getUserRepos -p test-event.json"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@upstash/redis": "^1.35.6",
+    "axios": "^1.12.2",
+    "dotenv": "^17.2.3"
+  },
+  "devDependencies": {
+    "serverless": "^3.40.0",
+    "serverless-dotenv-plugin": "^6.0.0",
+    "serverless-offline": "^13.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
