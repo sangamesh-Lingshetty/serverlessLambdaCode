@@ -28,3 +28,30 @@ done.
 next is continue part is = Step 2: Create Test File
 
 https://claude.ai/chat/d66b821d-0030-481d-8f32-7bf4fbd3a0a8
+
+
+next 15th november is start with 
+
+https://claude.ai/chat/d66b821d-0030-481d-8f32-7bf4fbd3a0a8
+
+⚡ START TODAY:
+Week 4 Action Plan (Multi-Tenancy):
+Day 1-2:
+AWS Cognito setup
+User sign-up/login API
+JWT token validation
+
+Day 3-4:
+Organization/tenant model
+Invite team members
+Role-based permissions
+
+Day 5-6:
+Data isolation in DynamoDB
+Tenant-scoped queries
+Security testing
+
+Day 7:
+Test everything
+Document architecture
+Update README
