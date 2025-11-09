@@ -6,14 +6,34 @@ provider:
   region: ap-south-1
   stage: ${opt:stage, 'dev'}
   memorySize: 1024
-  timeout: 30
+  timeout: 120
   
   environment:
     GITHUB_TOKEN: ${.env:GITHUB_TOKEN}
     NODE_ENV: ${opt:stage, 'dev'}
     UPSTASH_REDIS_REST_URL: ${.env:UPSTASH_REDIS_REST_URL}
     UPSTASH_REDIS_REST_TOKEN: ${.env:UPSTASH_REDIS_REST_TOKEN}
+    AWS_STAGE: ${self:provider.stage}
+    REGION: ${self:provider.region}
   
+
+  # IAM PERMISSIONS (Lambda can access DynamoDB)
+  iam:
+    role:
+      statements:
+        # Allow Lambda to read/write DynamoDB
+        - Effect: Allow
+          Action:
+            - dynamodb:Query        # Search by partition key
+            - dynamodb:Scan         # Search entire table
+            - dynamodb:GetItem      # Get single item
+            - dynamodb:PutItem      # Create/update item
+            - dynamodb:UpdateItem   # Update existing item
+            - dynamodb:DeleteItem   # Delete item
+          Resource:
+            # Allow access to our DynamoDB tables
+            - "arn:aws:dynamodb:${self:provider.region}:*:table/DevInsights-*"
+        
   httpApi:
     cors:
       allowedOrigins:
@@ -27,6 +47,7 @@ provider:
         - GET
         - POST
         - OPTIONS
+        - DELETE
       allowCredentials: true
 
 functions:
@@ -67,13 +88,27 @@ functions:
 
   getDashboard:
     handler: handlers/github.getDashBoardAnalytics
-    timeout: 60
+    timeout: 120
     memorySize: 2048
     events:
       - httpApi:
           path: /api/github/analytics/{username}
           method: get
 
+  getCacheStats:
+    handler: handlers/github.getCacheStats
+    events:
+      - httpApi:
+          path: /api/cache/stats
+          method: get
+
+  clearUserCache:
+    handler: handlers/github.clearUserCache
+    events:
+      - httpApi:
+          path: /api/cache/{username}
+          method: delete
+    
 plugins:
   - serverless-offline
   - serverless-dotenv-plugin
@@ -97,3 +132,68 @@ package:
     - '!.serverless/**'
     - '!test/**'
     - '!*.log'
+
+custom:
+  serverless-offline:
+    httpPort: 3000
+    timeout: 120
+
+
+# AWS RESOURCES (This creates DynamoDB table!)
+
+resources:
+  Resources:
+    AnalyticsCacheTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: DevInsights-AnalyticsCache-${self:provider.stage}
+
+        BillingMode: PAY_PER_REQUEST
+
+        AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
+
+          - AttributeName: cacheKey
+            AttributeType: S
+
+        KeySchema:
+
+          - AttributeName: userId
+            KeyType: HASH
+
+          - AttributeName: cacheKey
+            KeyType: RANGE
+
+        # TTL Configuration (Auto-delete old data)
+        TimeToLiveSpecification:
+
+          AttributeName: expiresAt
+          Enabled: true
+
+
+        # Tags for organization
+        Tags:
+          - Key: Project
+            Value: DevInsights
+          - Key: Environment
+            Value: ${self:provider.stage}
+          - Key: ManagedBy
+            Value: Serverless
+          
+  # Output values (useful for debugging)
+  Outputs:
+    AnalyticsCacheTableName:
+      Description: DynamoDB table name for analytics cache
+      Value: !Ref AnalyticsCacheTable
+      Export:
+        Name: ${self:service}-${self:provider.stage}-CacheTableName
+    
+    AnalyticsCacheTableArn:
+      Description: DynamoDB table ARN
+      Value: !GetAtt AnalyticsCacheTable.Arn
+      Export:
+        Name: ${self:service}-${self:provider.stage}-CacheTableArn
+
+
+

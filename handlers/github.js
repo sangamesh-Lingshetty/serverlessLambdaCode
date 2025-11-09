@@ -1,57 +1,74 @@
-const GitHubServices  = require("../services/githubService");
-const AnalyticServices= require("../services/analyticsService");
-const SimpeCacheService = require("../services/simpleCacheService");
+const GitHubServices = require("../services/githubService");
+const AnalyticServices = require("../services/analyticsService");
+const MultiTierCache = require("../services/multiTierCache");
 
 
 const githubService = new GitHubServices();
 const analyticService = new AnalyticServices();
-const cache = new SimpeCacheService();
+const cache = new MultiTierCache();
 
-
-const createResponse = (statusCode,body) =>({
-    statusCode,
-    headers:{
-        'Content-Type':'application/json',
-        'Access-Control-Allow-Origin':'*',
-        'Access-Control-Allow-Credentials':true,
-    },
-    body:JSON.stringify(body)
+const createResponse = (statusCode, body) => ({
+  statusCode,
+  headers: {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Credentials": true,
+  },
+  body: JSON.stringify(body),
 });
-
 
 module.exports.healthCheck = async (event) => {
   return createResponse(200, {
     message: "DevInsights API is running on AWS Lambda!",
     timestamp: new Date().toISOString(),
     version: "1.0.0",
-    environment: process.env.NODE_ENV || 'development',
+    environment: process.env.NODE_ENV || "development",
     endpoints: [
       "GET /api/github/repos/:username",
       "GET /api/github/repos/:owner/:repo/commits",
       "GET /api/github/repos/:owner/:repo/pulls",
       "GET /api/github/repos/:owner/:repo/issues",
       "GET /api/github/analytics/:username",
+      "GET /api/cache/stats",
+      "DELETE /api/cache/:username",
     ],
   });
 };
 
-
-module.exports.getUserRepositories = async(event)=>{
-    try {
-    // Extract parameters (Lambda way)
+module.exports.getUserRepositories = async (event) => {
+  try {
     const { username } = event.pathParameters;
     const { limit } = event.queryStringParameters || {};
 
-    // Validation (SAME as your Express code)
     if (!username || username.length < 1) {
       return createResponse(400, {
         error: "Username is required and must be valid...",
       });
     }
 
-    // Call your EXISTING service (NO CHANGES!)
+    // try cache first
+    const cacheKey = username;
+    const cached = await cache.getAnalytics(username);
+
+    if (cached) {
+      return createResponse(200, {
+        success: true,
+        username,
+        count: cached.data.length,
+        data: cached.data,
+        cached: true,
+        cache_age_seconds: cached.cache_age_seconds,
+        fetched_at: new Date(cached.cached_at).toISOString(),
+      });
+    }
+
+    // cache miss - fetch fresh data
     const repositories = await githubService.getUserRepositories(username, {
       limit: parseInt(limit) || 10,
+    });
+
+    await cache.saveAnalytics(cacheKey, {
+      data: repositories,
     });
 
     // Return response (SAME structure as Express)
@@ -60,9 +77,9 @@ module.exports.getUserRepositories = async(event)=>{
       username,
       count: repositories.length,
       data: repositories,
+      cached: false,
       fetched_at: new Date().toISOString(),
     });
-
   } catch (error) {
     console.log("get User Repo controller error", error.message);
     return createResponse(500, {
@@ -76,19 +93,16 @@ module.exports.getUserRepositories = async(event)=>{
   }
 };
 
-
 module.exports.getRepositoriesCommits = async (event) => {
   try {
     const { owner, repo } = event.pathParameters;
     const { days, limit } = event.queryStringParameters || {};
 
-    // Call your EXISTING service
     const commits = await githubService.getRepositoryCommits(owner, repo, {
       since: days ? githubService.getDateDaysAgo(parseInt(days)) : 0,
       limit: parseInt(limit) || 50,
     });
 
-    // Your EXISTING analytics logic (NO CHANGES!)
     const analytics = {
       total_commits: commits.length,
       unique_authors: [...new Set(commits.map((c) => c.author.email))].length,
@@ -110,7 +124,6 @@ module.exports.getRepositoriesCommits = async (event) => {
       commits,
       fetched_at: new Date().toISOString(),
     });
-
   } catch (error) {
     console.log("Commits route error:", error.message);
     return createResponse(500, {
@@ -123,8 +136,6 @@ module.exports.getRepositoriesCommits = async (event) => {
     });
   }
 };
-
-
 
 module.exports.getRepositoriesPullRequest = async (event) => {
   try {
@@ -171,7 +182,6 @@ module.exports.getRepositoriesPullRequest = async (event) => {
       pull_requests: pullRequests,
       fetched_at: new Date().toISOString(),
     });
-
   } catch (error) {
     console.log("Pull Request route error", error.message);
     return createResponse(500, {
@@ -184,8 +194,6 @@ module.exports.getRepositoriesPullRequest = async (event) => {
     });
   }
 };
-
-
 
 module.exports.getRepositoryIssues = async (event) => {
   try {
@@ -246,7 +254,6 @@ module.exports.getRepositoryIssues = async (event) => {
       issues,
       fetched_at: new Date().toISOString(),
     });
-
   } catch (error) {
     console.log("Issue route error", error.message);
     return createResponse(500, {
@@ -260,28 +267,41 @@ module.exports.getRepositoryIssues = async (event) => {
   }
 };
 
-
 module.exports.getDashBoardAnalytics = async (event) => {
   try {
     const { username } = event.pathParameters;
-    const { days = 30, repos_limit = 5 } = event.queryStringParameters || {};
+    const {
+      days = 30,
+      repos_limit = 5,
+      force_refresh,
+    } = event.queryStringParameters || {};
 
     console.log(`Generating complete analytics for ${username}...`);
-    const cacheData = await cache.getAnalytics(username);
 
-    if (cacheData) {
-      return {
-        statusCode: 200,
-        body: JSON.stringify({
-          analytics: cacheData,
-          from_cache: true,
-        }),
-      };
+    if (!force_refresh) {
+      const cachedData = await cache.getAnalytics(username);
+
+      if (cachedData) {
+        console.log(`✅ CACHE HIT for ${username}!`);
+
+        return createResponse(200, {
+          success: true,
+          username,
+          analytics: cachedData.analytics,
+          raw_data: cachedData.raw_data,
+          cached: true,
+          cache_age_seconds: cachedData.cache_age_seconds,
+          generated_at: new Date(cachedData.cached_at).toISOString(),
+        });
+      }
+      console.log(`❌ CACHE MISS for ${username} - generating fresh data...`);
+    } else {
+      console.log(`🔄 Force refresh requested for ${username}`);
     }
 
-    // cache miss - generae fresh data from API
+    const startTime = Date.now();
 
-    // Your ENTIRE existing logic (NO CHANGES!)
+    // cache miss - generae fresh data from Github API
     const repositories = await githubService.getUserRepositories(username, {
       limit: 10,
     });
@@ -291,7 +311,7 @@ module.exports.getDashBoardAnalytics = async (event) => {
     let allIssues = [];
 
     const reposToAnalyze = repositories.slice(0, parseInt(repos_limit));
-    
+
     for (const repo of reposToAnalyze) {
       try {
         const commits = await githubService.getRepositoryCommits(
@@ -388,16 +408,12 @@ module.exports.getDashBoardAnalytics = async (event) => {
       },
     };
 
-    console.log(`✅ Analytics generated successfully!`);
+    const genarationTime = Math.floor(Date.now() - startTime / 1000);
+    console.log(`✅ Analytics generated in ${genarationTime}s`);
 
-    // ofter fresh data save in the cache 
-    await cache.saveAnalytics(username,analytics);
-
-
-    return createResponse(200, {
-      success: true,
-      username,
-      analytics,
+    // ofter fresh data save in the cache
+    const dataToaCache = {
+      analytics: analytics,
       raw_data: {
         repositories: repositories.length,
         commits: allCommits.length,
@@ -405,6 +421,25 @@ module.exports.getDashBoardAnalytics = async (event) => {
         issues: allIssues.length,
         analyzed_repos: reposToAnalyze.length,
       },
+    };
+    // Save to cache (don't wait - async)
+    cache.saveAnalytics(username, dataToaCache).catch((err) => {
+      console.error("Failed to cache analytics:", err.message);
+    });
+
+    return createResponse(200, {
+      success: true,
+      username,
+      analytics,
+      cached: false,
+      raw_data: {
+        repositories: repositories.length,
+        commits: allCommits.length,
+        pull_requests: allPullRequests.length,
+        issues: allIssues.length,
+        analyzed_repos: reposToAnalyze.length,
+      },
+      generation_time_seconds: genarationTime,
       generated_at: new Date().toISOString(),
     });
 
@@ -413,11 +448,51 @@ module.exports.getDashBoardAnalytics = async (event) => {
     return createResponse(500, {
       success: false,
       error: {
-        type: error.type || 'ANALYTICS_ERROR',
+        type: error.type || "ANALYTICS_ERROR",
         message: error.message,
         details: error.details,
       },
     });
   }
+
 };
 
+// get cache statics
+
+module.exports.getCacheStats = async(event) =>{
+  try{
+    const stats = await cache.getStats();
+
+    return createResponse(200,{
+      sucess:true,
+      cache_stats:stats,
+      timestamp:new Date().toISOString()
+    });
+
+  }catch(error){
+    return createResponse(500,{
+      success:false,
+      error:error.message
+    })
+  }
+}
+
+module.exports.clearUserCache= async(event)=>{
+  try{
+    const { username } = event.pathParameters;
+    
+    const cleared = await cache.clearAnalytics(username);
+    
+    return createResponse(200, {
+      success: true,
+      message: `Cache cleared for ${username}`,
+      username
+    })
+
+  }catch(error){
+    return createResponse(500, {
+      success: false,
+      error: error.message
+    });
+  }
+}

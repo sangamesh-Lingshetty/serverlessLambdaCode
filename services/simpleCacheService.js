@@ -83,7 +83,7 @@ class SimpleCacheService {
       }
 
       // found it JSON parse sting back to object.
-      const parsedData = JSON.parse(cachedData);
+      const parsedData = cachedData;
       // Calculate how old the cache is
 
       const ageSeconds = Math.floor((Date.now() - parsedData.cached_at) / 1000);

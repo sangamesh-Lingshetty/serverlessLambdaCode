@@ -1,0 +1,30 @@
+https://claude.ai/share/2bc4ad31-e190-4302-98a0-64484d93d3b5
+
+
+updated chat history
+https://claude.ai/chat/c25faab5-5897-4a17-9996-fb56ffeb554d
+
+
+refer this below commits
+next week i have to start from the 
+TIME BLOCK 2 (30 mins): Issues API
+
+
+
+https://claude.ai/chat/c25faab5-5897-4a17-9996-fb56ffeb554d
+
+done.
+next week
+nevember 01 is the already deployed in the aws all lambda but locally it's working fine but in the lambda production not working 
+debugging the next weeek means when 1 nov is coming.
+
+https://claude.ai/chat/d66b821d-0030-481d-8f32-7bf4fbd3a0a8
+
+
+
+next week we have to do the first work is separate the file and github for the lambda all lambda code pushed it.
+done.
+
+next is continue part is = Step 2: Create Test File
+
+https://claude.ai/chat/d66b821d-0030-481d-8f32-7bf4fbd3a0a8
