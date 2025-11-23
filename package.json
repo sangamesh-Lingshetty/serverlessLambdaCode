@@ -19,9 +19,11 @@
   "license": "ISC",
   "dependencies": {
     "@upstash/redis": "^1.35.6",
+    "amazon-cognito-identity-js": "^6.3.16",
     "aws-sdk": "^2.1692.0",
     "axios": "^1.12.2",
-    "dotenv": "^17.2.3"
+    "dotenv": "^17.2.3",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "serverless": "^3.40.0",

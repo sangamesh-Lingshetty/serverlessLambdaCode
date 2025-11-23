@@ -4,8 +4,29 @@ Built a full-stack multi-tenant SaaS platform that connects with GitHub to analy
 // Automated alerts
 - Weekly reports
 - Performance alerts
-- Onboarding emails
+- Onboarding emails\\\
 ```
+
+onboaring process
+
+[Enterprise Signup]
+      ↓
+[Create Tenant in DynamoDB]
+      ↓
+[Add Users + Configure Roles]
+      ↓
+[Connect GitHub → Store Tokens]
+      ↓
+[Lambda fetches repos/issues/PRs → cache in Redis]
+      ↓
+[Dashboard pulls analytics by tenantId]
+      ↓
+[Admins view org metrics, Devs view their repos]
+      ↓
+[Cache invalidation + Billing + Logs per Tenant]
+
+
+
 
 **Interview Value:** ⭐⭐⭐⭐ (Shows product thinking)
 

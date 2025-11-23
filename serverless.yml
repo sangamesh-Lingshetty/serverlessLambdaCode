@@ -15,25 +15,35 @@ provider:
     UPSTASH_REDIS_REST_TOKEN: ${.env:UPSTASH_REDIS_REST_TOKEN}
     AWS_STAGE: ${self:provider.stage}
     REGION: ${self:provider.region}
-  
 
-  # IAM PERMISSIONS (Lambda can access DynamoDB)
+    USER_POOL_ID: !Ref CognitoUserPool
+    USER_POOL_CLIENT_ID: !Ref CognitoUserPoolClient
+  
   iam:
     role:
       statements:
-        # Allow Lambda to read/write DynamoDB
         - Effect: Allow
           Action:
-            - dynamodb:Query        # Search by partition key
-            - dynamodb:Scan         # Search entire table
-            - dynamodb:GetItem      # Get single item
-            - dynamodb:PutItem      # Create/update item
-            - dynamodb:UpdateItem   # Update existing item
-            - dynamodb:DeleteItem   # Delete item
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
           Resource:
-            # Allow access to our DynamoDB tables
             - "arn:aws:dynamodb:${self:provider.region}:*:table/DevInsights-*"
-        
+
+        - Effect: Allow
+          Action:
+            - cognito-idp:AdminGetUser
+            - cognito-idp:AdminCreateUser
+            - cognito-idp:AdminSetUserPassword
+            - cognito-idp:AdminUpdateUserAttributes
+            - cognito-idp:ListUsers
+          Resource:
+            - !GetAtt CognitoUserPool.Arn
+
+  # FIXED INDENTATION + AUTHORIZER
   httpApi:
     cors:
       allowedOrigins:
@@ -46,9 +56,19 @@ provider:
       allowedMethods:
         - GET
         - POST
+        - PUT
         - OPTIONS
         - DELETE
       allowCredentials: true
+
+    authorizers:
+      cognitoAuthorizer:
+        type: jwt
+        identitySource: $request.header.Authorization
+        issuerUrl: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPool}
+        audience:
+          - !Ref CognitoUserPoolClient
+
 
 functions:
   healthCheck:
@@ -58,19 +78,58 @@ functions:
           path: /api/health
           method: get
 
+  signUp:
+    handler: handlers/auth.signUp
+    events:
+      - httpApi:
+          path: /auth/signup
+          method: post
+
+  login:
+    handler: handlers/auth.login
+    events:
+      - httpApi:
+          path: /auth/login
+          method: post
+
+  verifyEmail:
+    handler: handlers/auth.verifyEmail
+    events:
+      - httpApi:
+          path: /auth/verify
+          method: post
+
+  refreshToken:
+    handler: handlers/auth.refreshToken
+    events:
+      - httpApi:
+          path: /auth/refresh
+          method: post
+
+  getCurrentUser:
+    handler: handlers/auth.getCurrentUser
+    events:
+      - httpApi:
+          path: /auth/me
+          method: get
+
   getUserRepos:
     handler: handlers/github.getUserRepositories
     events:
       - httpApi:
           path: /api/github/repos/{username}
           method: get
-    
+          authorizer:
+            name: cognitoAuthorizer
+
   getRepoCommits:
     handler: handlers/github.getRepositoriesCommits
     events:
       - httpApi:
           path: /api/github/repos/{owner}/{repo}/commits
           method: get
+          authorizer:
+            name: cognitoAuthorizer
 
   getRepoPulls:
     handler: handlers/github.getRepositoriesPullRequest
@@ -78,6 +137,8 @@ functions:
       - httpApi:
           path: /api/github/repos/{owner}/{repo}/pulls
           method: get
+          authorizer:
+            name: cognitoAuthorizer
 
   getRepoIssues:
     handler: handlers/github.getRepositoryIssues
@@ -85,6 +146,8 @@ functions:
       - httpApi:
           path: /api/github/repos/{owner}/{repo}/issues
           method: get
+          authorizer:
+            name: cognitoAuthorizer
 
   getDashboard:
     handler: handlers/github.getDashBoardAnalytics
@@ -94,6 +157,8 @@ functions:
       - httpApi:
           path: /api/github/analytics/{username}
           method: get
+          authorizer:
+            name: cognitoAuthorizer
 
   getCacheStats:
     handler: handlers/github.getCacheStats
@@ -101,6 +166,8 @@ functions:
       - httpApi:
           path: /api/cache/stats
           method: get
+          authorizer:
+            name: cognitoAuthorizer
 
   clearUserCache:
     handler: handlers/github.clearUserCache
@@ -108,22 +175,22 @@ functions:
       - httpApi:
           path: /api/cache/{username}
           method: delete
-    
+          authorizer:
+            name: cognitoAuthorizer
+
+
 plugins:
   - serverless-offline
   - serverless-dotenv-plugin
 
-# 🔥 CRITICAL: Package configuration (THIS WAS MISSING!)
+
 package:
   patterns:
-    # Include everything needed
     - 'handlers/**'
     - 'services/**'
     - 'utils/**'
-    - 'node_modules/**'  # 🚨 MUST include node_modules!
+    - 'node_modules/**'
     - 'package.json'
-    
-    # Exclude unnecessary files
     - '!.git/**'
     - '!.env'
     - '!.env.*'
@@ -133,67 +200,90 @@ package:
     - '!test/**'
     - '!*.log'
 
+
 custom:
   serverless-offline:
     httpPort: 3000
     timeout: 120
 
 
-# AWS RESOURCES (This creates DynamoDB table!)
-
 resources:
   Resources:
-    AnalyticsCacheTable:
-      Type: AWS::DynamoDB::Table
+
+    CognitoUserPool:
+      Type: AWS::Cognito::UserPool
       Properties:
-        TableName: DevInsights-AnalyticsCache-${self:provider.stage}
+        UserPoolName: ${self:service}-user-pool-${self:provider.stage}
+        UsernameAttributes:
+          - email
+        AutoVerifiedAttributes:
+          - email
+        Policies:
+          PasswordPolicy:
+            MinimumLength: 8
+            RequireLowercase: true
+            RequireUppercase: true
+            RequireNumbers: true
+            RequireSymbols: false
+        Schema:
+          - Name: email
+            AttributeDataType: String
+            Required: true
+            Mutable: false
+          - Name: name
+            AttributeDataType: String
+            Required: true
+            Mutable: true
+          - Name: organizationId
+            AttributeDataType: String
+            Mutable: true
+          - Name: role
+            AttributeDataType: String
+            Mutable: true
+        EmailVerificationMessage: 'Welcome to DevInsights! Your verification code is {####}'
+        EmailVerificationSubject: 'Verify your DevInsights account'
+        AccountRecoverySetting:
+          RecoveryMechanisms:
+            - Name: verified_email
+              Priority: 1
+        UserAttributeUpdateSettings:
+          AttributesRequireVerificationBeforeUpdate:
+            - email
 
-        BillingMode: PAY_PER_REQUEST
+    CognitoUserPoolClient:
+      Type: AWS::Cognito::UserPoolClient
+      Properties:
+        ClientName: ${self:service}-client-${self:provider.stage}
+        UserPoolId: !Ref CognitoUserPool
+        AccessTokenValidity: 1
+        IdTokenValidity: 1
+        RefreshTokenValidity: 30
+        TokenValidityUnits:
+          AccessToken: hours
+          IdToken: hours
+          RefreshToken: days
+        ExplicitAuthFlows:
+          - ALLOW_USER_PASSWORD_AUTH
+          - ALLOW_REFRESH_TOKEN_AUTH
+          - ALLOW_USER_SRP_AUTH
+        GenerateSecret: false
+        ReadAttributes:
+          - email
+          - name
+          - custom:organizationId
+          - custom:role
+        WriteAttributes:
+          - email
+          - name
+          - custom:organizationId
+          - custom:role
 
-        AttributeDefinitions:
-          - AttributeName: userId
-            AttributeType: S
-
-          - AttributeName: cacheKey
-            AttributeType: S
-
-        KeySchema:
-
-          - AttributeName: userId
-            KeyType: HASH
-
-          - AttributeName: cacheKey
-            KeyType: RANGE
-
-        # TTL Configuration (Auto-delete old data)
-        TimeToLiveSpecification:
-
-          AttributeName: expiresAt
-          Enabled: true
-
-
-        # Tags for organization
-        Tags:
-          - Key: Project
-            Value: DevInsights
-          - Key: Environment
-            Value: ${self:provider.stage}
-          - Key: ManagedBy
-            Value: Serverless
-          
-  # Output values (useful for debugging)
   Outputs:
-    AnalyticsCacheTableName:
-      Description: DynamoDB table name for analytics cache
-      Value: !Ref AnalyticsCacheTable
-      Export:
-        Name: ${self:service}-${self:provider.stage}-CacheTableName
+    UserPoolId:
+      Description: Cognito User Pool ID
+      Value: !Ref CognitoUserPool
     
-    AnalyticsCacheTableArn:
-      Description: DynamoDB table ARN
-      Value: !GetAtt AnalyticsCacheTable.Arn
-      Export:
-        Name: ${self:service}-${self:provider.stage}-CacheTableArn
-
-
+    UserPoolClientId:
+      Description: Cognito User Pool Client ID
+      Value: !Ref CognitoUserPoolClient        
 
