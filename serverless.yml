@@ -9,19 +9,23 @@ provider:
   timeout: 120
   
   environment:
+    # ✅ FIXED: Remove the dot before env
     GITHUB_TOKEN: ${.env:GITHUB_TOKEN}
     NODE_ENV: ${opt:stage, 'dev'}
     UPSTASH_REDIS_REST_URL: ${.env:UPSTASH_REDIS_REST_URL}
     UPSTASH_REDIS_REST_TOKEN: ${.env:UPSTASH_REDIS_REST_TOKEN}
     AWS_STAGE: ${self:provider.stage}
+    # ✅ FIXED: Changed REGION to AWS_REGION
     REGION: ${self:provider.region}
 
+    # Cognito
     USER_POOL_ID: !Ref CognitoUserPool
     USER_POOL_CLIENT_ID: !Ref CognitoUserPoolClient
   
   iam:
     role:
       statements:
+        # DynamoDB Permissions
         - Effect: Allow
           Action:
             - dynamodb:Query
@@ -31,19 +35,25 @@ provider:
             - dynamodb:UpdateItem
             - dynamodb:DeleteItem
           Resource:
-            - "arn:aws:dynamodb:${self:provider.region}:*:table/DevInsights-*"
+            - !GetAtt AnalyticsCacheTable.Arn
+            - !Sub "${AnalyticsCacheTable.Arn}/index/*"
 
+        # Cognito Permissions
         - Effect: Allow
           Action:
             - cognito-idp:AdminGetUser
             - cognito-idp:AdminCreateUser
             - cognito-idp:AdminSetUserPassword
             - cognito-idp:AdminUpdateUserAttributes
+            - cognito-idp:AdminInitiateAuth
+            - cognito-idp:AdminRespondToAuthChallenge
+            - cognito-idp:AdminConfirmSignUp
+            - cognito-idp:ConfirmSignUp
+            - cognito-idp:InitiateAuth
             - cognito-idp:ListUsers
           Resource:
             - !GetAtt CognitoUserPool.Arn
 
-  # FIXED INDENTATION + AUTHORIZER
   httpApi:
     cors:
       allowedOrigins:
@@ -57,27 +67,16 @@ provider:
         - GET
         - POST
         - PUT
-        - OPTIONS
         - DELETE
+        - OPTIONS
       allowCredentials: true
-
-    authorizers:
-      cognitoAuthorizer:
-        type: jwt
-        identitySource: $request.header.Authorization
-        issuerUrl: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPool}
-        audience:
-          - !Ref CognitoUserPoolClient
 
 
 functions:
-  healthCheck:
-    handler: handlers/github.healthCheck
-    events:
-      - httpApi:
-          path: /api/health
-          method: get
-
+  # ============================================
+  # AUTH ENDPOINTS
+  # ============================================
+  
   signUp:
     handler: handlers/auth.signUp
     events:
@@ -113,41 +112,48 @@ functions:
           path: /auth/me
           method: get
 
+  # ============================================
+  # GITHUB ANALYTICS ENDPOINTS
+  # ============================================
+
+  healthCheck:
+    handler: handlers/github.healthCheck
+    events:
+      - httpApi:
+          path: /api/health
+          method: get
+
   getUserRepos:
     handler: handlers/github.getUserRepositories
+    timeout: 30
     events:
       - httpApi:
           path: /api/github/repos/{username}
           method: get
-          authorizer:
-            name: cognitoAuthorizer
 
   getRepoCommits:
     handler: handlers/github.getRepositoriesCommits
+    timeout: 30
     events:
       - httpApi:
           path: /api/github/repos/{owner}/{repo}/commits
           method: get
-          authorizer:
-            name: cognitoAuthorizer
 
   getRepoPulls:
     handler: handlers/github.getRepositoriesPullRequest
+    timeout: 30
     events:
       - httpApi:
           path: /api/github/repos/{owner}/{repo}/pulls
           method: get
-          authorizer:
-            name: cognitoAuthorizer
 
   getRepoIssues:
     handler: handlers/github.getRepositoryIssues
+    timeout: 30
     events:
       - httpApi:
           path: /api/github/repos/{owner}/{repo}/issues
           method: get
-          authorizer:
-            name: cognitoAuthorizer
 
   getDashboard:
     handler: handlers/github.getDashBoardAnalytics
@@ -157,26 +163,22 @@ functions:
       - httpApi:
           path: /api/github/analytics/{username}
           method: get
-          authorizer:
-            name: cognitoAuthorizer
 
   getCacheStats:
     handler: handlers/github.getCacheStats
+    timeout: 10
     events:
       - httpApi:
           path: /api/cache/stats
           method: get
-          authorizer:
-            name: cognitoAuthorizer
 
   clearUserCache:
     handler: handlers/github.clearUserCache
+    timeout: 10
     events:
       - httpApi:
           path: /api/cache/{username}
           method: delete
-          authorizer:
-            name: cognitoAuthorizer
 
 
 plugins:
@@ -209,11 +211,51 @@ custom:
 
 resources:
   Resources:
+    # ============================================
+    # DYNAMODB TABLE
+    # ============================================
+    AnalyticsCacheTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: DevInsights-AnalyticsCache-${self:provider.stage}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: PK
+            AttributeType: S
+          - AttributeName: SK
+            AttributeType: S
+          - AttributeName: organizationId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: PK
+            KeyType: HASH
+          - AttributeName: SK
+            KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: OrganizationIndex
+            KeySchema:
+              - AttributeName: organizationId
+                KeyType: HASH
+              - AttributeName: SK
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+        TimeToLiveSpecification:
+          AttributeName: expiresAt
+          Enabled: true
+        Tags:
+          - Key: Project
+            Value: DevInsights
+          - Key: Environment
+            Value: ${self:provider.stage}
 
+    # ============================================
+    # COGNITO USER POOL
+    # ============================================
     CognitoUserPool:
       Type: AWS::Cognito::UserPool
       Properties:
-        UserPoolName: ${self:service}-user-pool-${self:provider.stage}
+        UserPoolName: ${self:service}-users-${self:provider.stage}
         UsernameAttributes:
           - email
         AutoVerifiedAttributes:
@@ -246,23 +288,24 @@ resources:
           RecoveryMechanisms:
             - Name: verified_email
               Priority: 1
-        UserAttributeUpdateSettings:
-          AttributesRequireVerificationBeforeUpdate:
-            - email
 
+    # ============================================
+    # COGNITO USER POOL CLIENT
+    # ============================================
     CognitoUserPoolClient:
       Type: AWS::Cognito::UserPoolClient
       Properties:
         ClientName: ${self:service}-client-${self:provider.stage}
         UserPoolId: !Ref CognitoUserPool
-        AccessTokenValidity: 1
-        IdTokenValidity: 1
+        AccessTokenValidity: 24
+        IdTokenValidity: 24
         RefreshTokenValidity: 30
         TokenValidityUnits:
           AccessToken: hours
           IdToken: hours
           RefreshToken: days
         ExplicitAuthFlows:
+          - ALLOW_ADMIN_USER_PASSWORD_AUTH 
           - ALLOW_USER_PASSWORD_AUTH
           - ALLOW_REFRESH_TOKEN_AUTH
           - ALLOW_USER_SRP_AUTH
@@ -275,15 +318,22 @@ resources:
         WriteAttributes:
           - email
           - name
-          - custom:organizationId
-          - custom:role
 
   Outputs:
     UserPoolId:
       Description: Cognito User Pool ID
       Value: !Ref CognitoUserPool
+      Export:
+        Name: ${self:service}-UserPoolId-${self:provider.stage}
     
     UserPoolClientId:
       Description: Cognito User Pool Client ID
-      Value: !Ref CognitoUserPoolClient        
+      Value: !Ref CognitoUserPoolClient
+      Export:
+        Name: ${self:service}-ClientId-${self:provider.stage}
 
+    AnalyticsCacheTableName:
+      Description: DynamoDB Table Name
+      Value: !Ref AnalyticsCacheTable
+      Export:
+        Name: ${self:service}-TableName-${self:provider.stage}

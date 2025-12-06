@@ -1,144 +1,157 @@
-const AWS = require("aws-sdk");
-const { v4: uuidv4 } = require("uuid");
+// DevInsights-Organizations
+
+
+const AWS = require('aws-sdk');
+const dynamodb = new AWS.DynamoDB.DocumentClient();
+const { v4: uuidv4 } = require('uuid');
 
 class OrganizationService {
-  constructor() {
-    this.dynamodb = new AWS.DynamoDB.DocumentClient({
-      region: process.env.AWS_REGION || "ap-south-1",
-    });
-
-    this.tableName = `DevInsights-Organizations-${
-      process.env.AWS_STAGE || "dev"
-    }`;
-    console.log("✅ OrganizationService initialized");
-  }
-
-  // create organization
   /**
    * Create a new organization
-   *
-   * @param {Object} orgData - Organization data
-   * @param {string} orgData.name - Organization name
-   * @param {string} orgData.plan - Subscription plan
-   * @returns {Promise<Object>} - Created organization
+   * Called when user signs up
    */
-
-  async create({ name, plan = "free" }) {
+  async createOrganization(data) {
+    const organizationId = `org-${data.name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
+    
+    const organization = {
+      // Partition Key
+      PK: `ORG#${organizationId}`,
+      // Sort Key
+      SK: 'METADATA',
+      
+      // Data
+      id: organizationId,
+      name: data.name,
+      plan: 'free',                    // Default: free plan
+      maxMembers: 5,                   // Free plan: max 5 members
+      
+      billing: {
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        nextBillDate: null
+      },
+      
+      settings: {
+        timezone: 'UTC',
+        language: 'en',
+        notifications: true
+      },
+      
+      createdAt: Math.floor(Date.now() / 1000),
+      updatedAt: Math.floor(Date.now() / 1000)
+    };
+    
+    // Save to DynamoDB
+    const params = {
+      TableName: process.env.DYNAMODB_TABLE || 'DevInsights-Organizations',
+      Item: organization
+    };
+    
     try {
-      console.log(`📝 Creating organization: ${name}`);
-      //   generate uniue ID
-      const id = `org-${uuidv4().substring(0, 8)}`;
-      // set the plan limit
-      const planLimits = this.getPlanLimits(plan);
-
-      const organization = {
-        id: id,
-        name: name,
-        plan: plan,
-
-        maxMemmbers: planLimits.maxMemmbers,
-        maxRepos: planLimits.maxRepos,
-        features: planLimits.features,
-
-        // Billing
-        billing: {
-          status: "active",
-          trialEndsAt: Date.now() + 14 * 24 * 60 * 60 * 1000, // 14 days trial
-          nextBillDate: null,
-        },
-
-        // Settings
-        settings: {
-          timezone: "UTC",
-          githubInstalled: false,
-          aiEnabled: plan !== "free",
-        },
-        // Metadata
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-
-      //   save to dynamodb
-      await this.dynamodb
-        .put({
-          TableName: this.tableName,
-          Item: organization,
-        })
-        .promise();
-
-      console.log(`✅ Organization created: ${id}`);
-
+      await dynamodb.put(params).promise();
+      console.log(`✅ Organization created: ${organizationId}`);
       return organization;
     } catch (error) {
-      console.error("❌ Create organization error:", error.message);
+      console.error(`❌ Failed to create organization:`, error);
       throw error;
     }
   }
-
-  //   get organization
+  
   /**
    * Get organization by ID
-   *
-   * @param {string} id - Organization ID
-   * @returns {Promise<Object|null>} - Organization or null
    */
-
-  async getById(id) {
+  async getOrganization(organizationId) {
+    const params = {
+      TableName: process.env.DYNAMODB_TABLE || 'DevInsights-Organizations',
+      Key: {
+        PK: `ORG#${organizationId}`,
+        SK: 'METADATA'
+      }
+    };
+    
     try {
-      const result = await this.dynamodb
-        .get({
-          TableName: this.tableName,
-          Key: { id },
-        })
-        .promise();
-
+      const result = await dynamodb.get(params).promise();
       return result.Item || null;
     } catch (error) {
-      console.error("❌ Get organization error:", error.message);
+      console.error(`❌ Failed to get organization:`, error);
       throw error;
     }
   }
-
-  //   update organization
+  
   /**
-   * Update organization details
-   *
-   * @param {string} id - Organization ID
-   * @param {Object} updates - Fields to update
-   * @returns {Promise<Object>} - Updated organization
+   * Get all members in organization
    */
-  async update(id, updates) {
+  async getOrganizationMembers(organizationId) {
+    const params = {
+      TableName: process.env.DYNAMODB_TABLE || 'DevInsights-Organizations',
+      IndexName: 'OrganizationIndex',  // We'll create this GSI
+      KeyConditionExpression: 'organizationId = :oid',
+      ExpressionAttributeValues: {
+        ':oid': organizationId
+      }
+    };
+    
     try {
-      console.log(`📝 Updating organization: ${id}`);
-
-      let updateExpression = "SET updatedAt = :updatedAt";
-      const expressionAttributeValue = {
-        ":updatedAt": Date.now(),
-      };
-
-      //Add each update field
-      Object.keys(updates).forEach((key) => {
-        updateExpression += `, #${key} = :${key}`;
-        expressionAttributeValue[`:${key}`] = updates[key];
-      });
-
-      const expressionAttributeNames = {};
-      Object.keys(updates).forEach((key) => {
-        expressionAttributeNames[`#${key}`] = key;
-      });
-
-      const result = await this.dynamodb.update({
-        TableName: this.tableName,
-        key: { id },
-        UpateExpression: updateExpression,
-        ExpressionAttributeValues: expressionAttributeValue,
-        ExpressionAttributeNames: expressionAttributeNames,
-        ReturnValues: "ALL_NEW",
-      }).promise();
-
-      console.log(`✅ Organization updated: ${id}`);
-
+      const result = await dynamodb.query(params).promise();
+      return result.Items || [];
+    } catch (error) {
+      console.error(`❌ Failed to get members:`, error);
+      throw error;
+    }
+  }
+  
+  /**
+   * Update organization plan
+   */
+  async upgradePlan(organizationId, newPlan) {
+    const plans = {
+      free: { name: 'free', maxMembers: 5, price: 0 },
+      pro: { name: 'pro', maxMembers: 25, price: 99 },
+      enterprise: { name: 'enterprise', maxMembers: 1000, price: 'custom' }
+    };
+    
+    const params = {
+      TableName: process.env.DYNAMODB_TABLE || 'DevInsights-Organizations',
+      Key: {
+        PK: `ORG#${organizationId}`,
+        SK: 'METADATA'
+      },
+      UpdateExpression: 'SET #plan = :plan, maxMembers = :members, updatedAt = :now',
+      ExpressionAttributeNames: {
+        '#plan': 'plan'
+      },
+      ExpressionAttributeValues: {
+        ':plan': newPlan,
+        ':members': plans[newPlan].maxMembers,
+        ':now': Math.floor(Date.now() / 1000)
+      },
+      ReturnValues: 'ALL_NEW'
+    };
+    
+    try {
+      const result = await dynamodb.update(params).promise();
+      console.log(`✅ Plan upgraded to: ${newPlan}`);
       return result.Attributes;
-    } catch (error) {}
+    } catch (error) {
+      console.error(`❌ Failed to upgrade plan:`, error);
+      throw error;
+    }
   }
 }
+
+module.exports = OrganizationService;
+// ```
+
+// **Why Each Method?**
+// ```
+// ✅ createOrganization:
+//    When user signs up → Creates their company account
+
+// ✅ getOrganization:
+//    Need to fetch org details → Check plan, billing, etc.
+
+// ✅ getOrganizationMembers:
+//    Admin wants to see team → List all members
+
+// ✅ upgradePlan:
+//    User upgrades → free → pro → More features unlocked

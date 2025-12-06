@@ -14,20 +14,20 @@ const createResponse = (statusCode,body) => ({
 
 module.exports.signUp = async (event) => {
   try {
-    console.log("Sign-Up request recieved");
+    console.log("📝 Sign-Up request received");
 
     const body = JSON.parse(event.body);
-    const { email, password, name } = body;
+    const { email, password, name, companyName } = body;
 
     // Validate input
-    if (!email || !password || !name) {
+    if (!email || !password || !name || !companyName) {
       return createResponse(400, {
         success: false,
-        error: "Email, password, and name are required",
+        error: "Email, password, name, and companyName are required",
       });
     }
 
-    // check if user already exists
+    // Check if user already exists
     const userExists = await cognitoService.userExists(email);
     if (userExists) {
       return createResponse(409, {
@@ -36,19 +36,15 @@ module.exports.signUp = async (event) => {
       });
     }
 
-    // Create user in Cognito
-    // For now: organizationId = email (simple!)
-    // Later: We'll create real organizations
+    // ✅ NEW: Create organization + user
+    const result = await cognitoService.signUp(
+      email,
+      password,
+      name,
+      companyName  // ← Pass company name!
+    );
 
-    const result = await cognitoService.signUp({
-      email: email,
-      password: password,
-      name: name,
-      organizationId: email,
-      role: "admin",
-    });
-
-    console.log("✅ User created successfully");
+    console.log("✅ Organization created and user registered");
 
     return createResponse(201, {
       success: true,
@@ -56,18 +52,20 @@ module.exports.signUp = async (event) => {
       data: {
         userId: result.userSub,
         email: email,
+        organizationId: result.organizationId,  // ← Return org ID
         emailVerified: result.emailVerified,
       },
     });
   } catch (error) {
-    console.log("Sign-Up error", error.message);
+    console.error("❌ Sign-Up error:", error.message);
 
     return createResponse(500, {
-      sucess: false,
+      success: false,
       error: error.message,
     });
   }
 };
+
 
 module.exports.login = async (event) => {
   try {
