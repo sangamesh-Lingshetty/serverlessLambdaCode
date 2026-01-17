@@ -1,8 +1,8 @@
-const CognitoService = require("../services/congnitoService");
+// handlers/auth.js - UPDATED
+const CognitoService = require("../services/cognitoService");
 const cognitoService = new CognitoService();
 
-// helper:create response
-const createResponse = (statusCode,body) => ({
+const createResponse = (statusCode, body) => ({
   statusCode,
   headers: {
     "Content-Type": "application/json",
@@ -11,6 +11,10 @@ const createResponse = (statusCode,body) => ({
   },
   body: JSON.stringify(body),
 });
+
+// ============================================
+// SIGN UP - ⭐ NOW RETURNS organizationId!
+// ============================================
 
 module.exports.signUp = async (event) => {
   try {
@@ -36,12 +40,16 @@ module.exports.signUp = async (event) => {
       });
     }
 
-    // ✅ NEW: Create organization + user
+    // ⭐ Calls updated cognitoService.signUp() which now:
+    //    1. Creates Cognito user
+    //    2. Creates organization in DynamoDB
+    //    3. Creates user record in DynamoDB
+    //    4. Returns all data
     const result = await cognitoService.signUp(
       email,
       password,
       name,
-      companyName  // ← Pass company name!
+      companyName
     );
 
     console.log("✅ Organization created and user registered");
@@ -52,8 +60,10 @@ module.exports.signUp = async (event) => {
       data: {
         userId: result.userSub,
         email: email,
-        organizationId: result.organizationId,  // ← Return org ID
+        organizationId: result.organizationId, // ⭐ NEW!
         emailVerified: result.emailVerified,
+        organization: result.organization, // ⭐ NEW!
+        user: result.user, // ⭐ NEW!
       },
     });
   } catch (error) {
@@ -66,24 +76,26 @@ module.exports.signUp = async (event) => {
   }
 };
 
+// ============================================
+// LOGIN - ⭐ NOW RETURNS organizationId!
+// ============================================
 
 module.exports.login = async (event) => {
   try {
     console.log("🔐 Login request received");
 
-    // Parse request body
-    const body = JSON.parse(event.body);
-    const { email, password } = body;
+    const body = JSON.parse(event?.body);
+    // const { email, password } = body;
 
     // Validate input
-    if (!email || !password) {
+    if (!body?.email || !body?.password) {
       return createResponse(400, {
         success: false,
         error: "Email and password are required",
       });
     }
 
-    const result = await cognitoService.login(email, password);
+    const result = await cognitoService.login(body?.email, body?.password);
     if (!result.success) {
       return createResponse(401, {
         success: false,
@@ -91,6 +103,7 @@ module.exports.login = async (event) => {
       });
     }
 
+    // ⭐ DECODE TOKEN to get organizationId + role
     const userInfo = cognitoService.decodeToken(result.idToken);
 
     console.log("✅ Login successful");
@@ -105,13 +118,13 @@ module.exports.login = async (event) => {
         refreshToken: result.refreshToken,
         expiresIn: result.expiresIn,
 
-        // User info
+        // User info - ⭐ NOW INCLUDES organizationId!
         user: {
           id: userInfo.sub,
           email: userInfo.email,
           name: userInfo.name,
-          organizationId: userInfo.organizationId,
-          role: userInfo.role,
+          organizationId: userInfo.organizationId, // ⭐ NEW!
+          role: userInfo.role, // ⭐ NEW!
         },
       },
     });
@@ -124,15 +137,18 @@ module.exports.login = async (event) => {
     });
   }
 };
-//   verify email
+
+// ============================================
+// VERIFY EMAIL
+// ============================================
+
 module.exports.verifyEmail = async (event) => {
   try {
     console.log("✉️ Email verification request received");
-    // Parse request body
+
     const body = JSON.parse(event.body);
     const { email, code } = body;
 
-    // Validate input
     if (!email || !code) {
       return createResponse(400, {
         success: false,
@@ -157,17 +173,20 @@ module.exports.verifyEmail = async (event) => {
   }
 };
 
-// 4. REFRESH TOKEN (Get new access token)
+// ============================================
+// REFRESH TOKEN
+// ============================================
+
 module.exports.refreshToken = async (event) => {
   try {
     console.log("🔄 Token refresh request received");
-    // Parse request body
+
     const body = JSON.parse(event.body);
     const { refreshToken } = body;
 
     if (!refreshToken) {
       return createResponse(400, {
-        sucess: false,
+        success: false,
         error: "Refresh token is required",
       });
     }
@@ -194,6 +213,10 @@ module.exports.refreshToken = async (event) => {
   }
 };
 
+// ============================================
+// GET CURRENT USER - ⭐ WITH ORGANIZATION!
+// ============================================
+
 module.exports.getCurrentUser = async (event) => {
   try {
     const authHeader =
@@ -207,9 +230,10 @@ module.exports.getCurrentUser = async (event) => {
 
     const token = authHeader.split(" ")[1];
 
+    // ⭐ VERIFY TOKEN - returns organizationId + role
     const userInfo = await cognitoService.verifyToken(token);
 
-    console.log("user info retrieved");
+    console.log("✅ User info retrieved");
 
     return createResponse(200, {
       success: true,
@@ -217,15 +241,15 @@ module.exports.getCurrentUser = async (event) => {
         id: userInfo.sub,
         email: userInfo.email,
         name: userInfo.name,
-        organizationId: userInfo.organizationId,
-        role: userInfo.role,
+        organizationId: userInfo.organizationId, // ⭐ NOW INCLUDED!
+        role: userInfo.role, // ⭐ NOW INCLUDED!
       },
     });
   } catch (error) {
     console.error("❌ Get user error:", error.message);
 
-    return createResponse(500, {
-      sucess: false,
+    return createResponse(401, {
+      success: false,
       error: error.message,
     });
   }

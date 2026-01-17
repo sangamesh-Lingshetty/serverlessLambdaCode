@@ -7,25 +7,24 @@ provider:
   stage: ${opt:stage, 'dev'}
   memorySize: 1024
   timeout: 120
-  
+
   environment:
-    # ✅ FIXED: Remove the dot before env
     GITHUB_TOKEN: ${.env:GITHUB_TOKEN}
     NODE_ENV: ${opt:stage, 'dev'}
     UPSTASH_REDIS_REST_URL: ${.env:UPSTASH_REDIS_REST_URL}
     UPSTASH_REDIS_REST_TOKEN: ${.env:UPSTASH_REDIS_REST_TOKEN}
     AWS_STAGE: ${self:provider.stage}
-    # ✅ FIXED: Changed REGION to AWS_REGION
-    REGION: ${self:provider.region}
 
     # Cognito
     USER_POOL_ID: !Ref CognitoUserPool
     USER_POOL_CLIENT_ID: !Ref CognitoUserPoolClient
-  
+
   iam:
     role:
       statements:
-        # DynamoDB Permissions
+        # ============================================
+        # DYNAMODB PERMISSIONS (ORIGINAL)
+        # ============================================
         - Effect: Allow
           Action:
             - dynamodb:Query
@@ -38,7 +37,28 @@ provider:
             - !GetAtt AnalyticsCacheTable.Arn
             - !Sub "${AnalyticsCacheTable.Arn}/index/*"
 
-        # Cognito Permissions
+        # ============================================
+        # DYNAMODB PERMISSIONS (⭐ NEW TABLES)
+        # ============================================
+        - Effect: Allow
+          Action:
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+          Resource:
+            - !GetAtt OrganizationsTable.Arn
+            - !Sub "${OrganizationsTable.Arn}/index/*"
+            - !GetAtt UsersTable.Arn
+            - !Sub "${UsersTable.Arn}/index/*"
+            - !GetAtt InvitationsTable.Arn
+            - !Sub "${InvitationsTable.Arn}/index/*"
+
+        # ============================================
+        # COGNITO PERMISSIONS
+        # ============================================
         - Effect: Allow
           Action:
             - cognito-idp:AdminGetUser
@@ -71,12 +91,11 @@ provider:
         - OPTIONS
       allowCredentials: true
 
-
 functions:
   # ============================================
-  # AUTH ENDPOINTS
+  # AUTH ENDPOINTS (EXISTING)
   # ============================================
-  
+
   signUp:
     handler: handlers/auth.signUp
     events:
@@ -113,7 +132,7 @@ functions:
           method: get
 
   # ============================================
-  # GITHUB ANALYTICS ENDPOINTS
+  # GITHUB ANALYTICS ENDPOINTS (EXISTING)
   # ============================================
 
   healthCheck:
@@ -180,39 +199,127 @@ functions:
           path: /api/cache/{username}
           method: delete
 
+  # ============================================
+  # TEAM MANAGEMENT ENDPOINTS (⭐ NEW)
+  # ============================================
+
+  createInvitation:
+    handler: handlers/invitations.createInvitation
+    events:
+      - httpApi:
+          path: /invitations
+          method: post
+
+  getInvitations:
+    handler: handlers/invitations.getInvitations
+    events:
+      - httpApi:
+          path: /invitations/{organizationId}
+          method: get
+
+  acceptInvitation:
+    handler: handlers/invitations.acceptInvitation
+    events:
+      - httpApi:
+          path: /invitations/{token}/accept
+          method: post
+
+  getTeamMembers:
+    handler: handlers/teams.getTeamMembers
+    events:
+      - httpApi:
+          path: /teams/{organizationId}/members
+          method: get
+
+  updateMemberRole:
+    handler: handlers/teams.updateMemberRole
+    events:
+      - httpApi:
+          path: /teams/{organizationId}/members/{email}/role
+          method: put
+
+  removeMember:
+    handler: handlers/teams.removeMember
+    events:
+      - httpApi:
+          path: /teams/{organizationId}/members/{email}
+          method: delete
+
+   # ⭐ ADD NEW FUNCTIONS HERE:
+  analyzeCodeQuality:
+    handler: handlers/ai.analyzeCodeQuality
+    timeout: 60
+    memorySize: 512
+    events:
+      - httpApi:
+          path: /ai/code-quality/{username}
+          method: get
+
+  detectBurnoutRisk:
+    handler: handlers/ai.detectBurnoutRisk
+    timeout: 60
+    memorySize: 512
+    events:
+      - httpApi:
+          path: /ai/burnout-risk/{email}
+          method: get
+
+  analyzeTeamPerformance:
+    handler: handlers/ai.analyzeTeamPerformance
+    timeout: 60
+    memorySize: 512
+    events:
+      - httpApi:
+          path: /ai/team-performance/{organizationId}
+          method: get
+
+  getAiDashboard:
+    handler: handlers/ai.getDashboard
+    timeout: 60
+    memorySize: 512
+    events:
+      - httpApi:
+          path: /ai/dashboard/{organizationId}
+          method: get
+
+  generateReport:
+    handler: handlers/ai.generateReport
+    timeout: 60
+    memorySize: 512
+    events:
+      - httpApi:
+          path: /ai/generate-report/{organizationId}
+          method: post
 
 plugins:
   - serverless-offline
   - serverless-dotenv-plugin
 
-
 package:
   patterns:
-    - 'handlers/**'
-    - 'services/**'
-    - 'utils/**'
-    - 'node_modules/**'
-    - 'package.json'
-    - '!.git/**'
-    - '!.env'
-    - '!.env.*'
-    - '!README.md'
-    - '!.gitignore'
-    - '!.serverless/**'
-    - '!test/**'
-    - '!*.log'
-
+    - "handlers/**"
+    - "services/**"
+    - "utils/**"
+    - "node_modules/**"
+    - "package.json"
+    - "!.git/**"
+    - "!.env"
+    - "!.env.*"
+    - "!README.md"
+    - "!.gitignore"
+    - "!.serverless/**"
+    - "!test/**"
+    - "*.log"
 
 custom:
   serverless-offline:
     httpPort: 3000
     timeout: 120
 
-
 resources:
   Resources:
     # ============================================
-    # DYNAMODB TABLE
+    # ANALYTICS CACHE TABLE (EXISTING)
     # ============================================
     AnalyticsCacheTable:
       Type: AWS::DynamoDB::Table
@@ -250,7 +357,94 @@ resources:
             Value: ${self:provider.stage}
 
     # ============================================
-    # COGNITO USER POOL
+    # ORGANIZATIONS TABLE (⭐ NEW)
+    # ============================================
+    OrganizationsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: DevInsights-Organizations-${self:provider.stage}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: organizationId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: organizationId
+            KeyType: HASH
+        Tags:
+          - Key: Project
+            Value: DevInsights
+          - Key: Environment
+            Value: ${self:provider.stage}
+
+    # ============================================
+    # USERS TABLE (⭐ NEW)
+    # ============================================
+    UsersTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: DevInsights-Users-${self:provider.stage}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: email
+            AttributeType: S
+          - AttributeName: organizationId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: email
+            KeyType: HASH
+          - AttributeName: organizationId
+            KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: OrganizationIndex
+            KeySchema:
+              - AttributeName: organizationId
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+        Tags:
+          - Key: Project
+            Value: DevInsights
+          - Key: Environment
+            Value: ${self:provider.stage}
+
+    # ============================================
+    # INVITATIONS TABLE (⭐ NEW)
+    # ============================================
+    InvitationsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: DevInsights-Invitations-${self:provider.stage}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: organizationId
+            AttributeType: S
+          - AttributeName: invitationId
+            AttributeType: S
+          - AttributeName: token
+            AttributeType: S
+        KeySchema:
+          - AttributeName: organizationId
+            KeyType: HASH
+          - AttributeName: invitationId
+            KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: TokenIndex
+            KeySchema:
+              - AttributeName: token
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+        TimeToLiveSpecification:
+          AttributeName: expiresAt
+          Enabled: true
+        Tags:
+          - Key: Project
+            Value: DevInsights
+          - Key: Environment
+            Value: ${self:provider.stage}
+
+    # ============================================
+    # COGNITO USER POOL (EXISTING)
     # ============================================
     CognitoUserPool:
       Type: AWS::Cognito::UserPool
@@ -282,15 +476,15 @@ resources:
           - Name: role
             AttributeDataType: String
             Mutable: true
-        EmailVerificationMessage: 'Welcome to DevInsights! Your verification code is {####}'
-        EmailVerificationSubject: 'Verify your DevInsights account'
+        EmailVerificationMessage: "Welcome to DevInsights! Your verification code is {####}"
+        EmailVerificationSubject: "Verify your DevInsights account"
         AccountRecoverySetting:
           RecoveryMechanisms:
             - Name: verified_email
               Priority: 1
 
     # ============================================
-    # COGNITO USER POOL CLIENT
+    # COGNITO USER POOL CLIENT (EXISTING)
     # ============================================
     CognitoUserPoolClient:
       Type: AWS::Cognito::UserPoolClient
@@ -305,7 +499,7 @@ resources:
           IdToken: hours
           RefreshToken: days
         ExplicitAuthFlows:
-          - ALLOW_ADMIN_USER_PASSWORD_AUTH 
+          - ALLOW_ADMIN_USER_PASSWORD_AUTH
           - ALLOW_USER_PASSWORD_AUTH
           - ALLOW_REFRESH_TOKEN_AUTH
           - ALLOW_USER_SRP_AUTH
@@ -325,7 +519,7 @@ resources:
       Value: !Ref CognitoUserPool
       Export:
         Name: ${self:service}-UserPoolId-${self:provider.stage}
-    
+
     UserPoolClientId:
       Description: Cognito User Pool Client ID
       Value: !Ref CognitoUserPoolClient
@@ -333,7 +527,25 @@ resources:
         Name: ${self:service}-ClientId-${self:provider.stage}
 
     AnalyticsCacheTableName:
-      Description: DynamoDB Table Name
+      Description: DynamoDB Analytics Cache Table Name
       Value: !Ref AnalyticsCacheTable
       Export:
-        Name: ${self:service}-TableName-${self:provider.stage}
+        Name: ${self:service}-AnalyticsCacheTableName-${self:provider.stage}
+
+    OrganizationsTableName:
+      Description: DynamoDB Organizations Table Name
+      Value: !Ref OrganizationsTable
+      Export:
+        Name: ${self:service}-OrganizationsTableName-${self:provider.stage}
+
+    UsersTableName:
+      Description: DynamoDB Users Table Name
+      Value: !Ref UsersTable
+      Export:
+        Name: ${self:service}-UsersTableName-${self:provider.stage}
+
+    InvitationsTableName:
+      Description: DynamoDB Invitations Table Name
+      Value: !Ref InvitationsTable
+      Export:
+        Name: ${self:service}-InvitationsTableName-${self:provider.stage}

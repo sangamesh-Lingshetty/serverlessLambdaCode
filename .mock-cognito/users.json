@@ -1,22 +1,12 @@
 {
-  "Sangamesh@boass.com": {
-    "userSub": "mock-user-1763902079011",
-    "email": "Sangamesh@boass.com",
+  "sangameshlingshetty9819@gmail.com": {
+    "userSub": "cognito-1768634975274-vseben",
+    "email": "sangameshlingshetty9819@gmail.com",
     "password": "3c9acf938a17757294c69b6043b6ed09f0fad5eb88452a5d44d9401812cf6ce7",
     "name": "Sangamesh",
-    "organizationId": "Sangamesh@boass.com",
+    "organizationId": "org-getquestionnereir-1768634975274",
     "role": "admin",
     "emailVerified": true,
-    "createdAt": 1763902079017
-  },
-  "john@example.com": {
-    "userSub": "cognito-1765042049117-96kbxu",
-    "email": "john@example.com",
-    "password": "07480fb9e85b9396af06f006cf1c95024af2531c65fb505cfbd0add1e2f31573",
-    "name": "John",
-    "organizationId": "org-test-company-1765042049117",
-    "role": "admin",
-    "emailVerified": true,
-    "createdAt": 1765042049142
+    "createdAt": 1768634975283
   }
 }

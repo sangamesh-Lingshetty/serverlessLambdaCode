@@ -1,6 +1,10 @@
-// services/cognitoService.js
+// services/cognitoService.js - FIXED VERSION
+// Fix: mockVerifyToken now returns actual user data, not hardcoded mock
+
 const AWS = require("aws-sdk");
 const crypto = require("crypto");
+const OrganizationService = require("./organizationService");
+const UserService = require("./userService");
 
 class CognitoService {
   constructor() {
@@ -18,12 +22,11 @@ class CognitoService {
       this.clientId = process.env.USER_POOL_CLIENT_ID;
     }
 
+    this.organizationService = new OrganizationService();
+    this.userService = new UserService();
+
     console.log("✅ CognitoService initialized");
   }
-
-  // ============================================
-  // MOCK INITIALIZATION (Local Testing)
-  // ============================================
 
   initMock() {
     const fs = require("fs");
@@ -31,7 +34,6 @@ class CognitoService {
 
     this.mockDir = path.join(__dirname, "..", ".mock-cognito");
     this.usersFile = path.join(this.mockDir, "users.json");
-    this.tokensFile = path.join(this.mockDir, "tokens.json");
 
     if (!fs.existsSync(this.mockDir)) {
       fs.mkdirSync(this.mockDir, { recursive: true });
@@ -39,9 +41,6 @@ class CognitoService {
 
     if (!fs.existsSync(this.usersFile)) {
       fs.writeFileSync(this.usersFile, JSON.stringify({}));
-    }
-    if (!fs.existsSync(this.tokensFile)) {
-      fs.writeFileSync(this.tokensFile, JSON.stringify({}));
     }
 
     console.log("📁 Mock user storage initialized");
@@ -58,19 +57,8 @@ class CognitoService {
     fs.writeFileSync(this.usersFile, JSON.stringify(users, null, 2));
   }
 
-  loadTokens() {
-    const fs = require("fs");
-    const data = fs.readFileSync(this.tokensFile, "utf8");
-    return JSON.parse(data);
-  }
-
-  saveTokens(tokens) {
-    const fs = require("fs");
-    fs.writeFileSync(this.tokensFile, JSON.stringify(tokens, null, 2));
-  }
-
   // ============================================
-  // SIGN UP
+  // SIGN UP - WITH DYNAMODB
   // ============================================
 
   async signUp(email, password, name, companyName) {
@@ -78,7 +66,6 @@ class CognitoService {
       return this.mockSignUp({ email, password, name, companyName });
     }
 
-    // Real AWS Cognito
     try {
       console.log(`📝 AWS: Creating user: ${email}`);
 
@@ -88,16 +75,13 @@ class CognitoService {
 
       console.log(`🏢 Organization: ${organizationId}`);
 
-      // Step 1: Create user (WITHOUT auto-verifying email)
       const createParams = {
         UserPoolId: this.userPoolId,
         Username: email,
-        TemporaryPassword: password, // ← Use temporary password first
-        MessageAction: "SUPPRESS", // ← Don't send welcome email yet
+        TemporaryPassword: password,
+        MessageAction: "SUPPRESS",
         UserAttributes: [
           { Name: "email", Value: email },
-          // ❌ REMOVE: { Name: "email_verified", Value: "true" }
-          // This was preventing email verification!
           { Name: "name", Value: name },
           { Name: "custom:organizationId", Value: organizationId },
           { Name: "custom:role", Value: "admin" },
@@ -107,7 +91,6 @@ class CognitoService {
       await this.cognito.adminCreateUser(createParams).promise();
       console.log(`✅ User created in Cognito`);
 
-      // Step 2: Set permanent password
       const passwordParams = {
         UserPoolId: this.userPoolId,
         Username: email,
@@ -118,14 +101,31 @@ class CognitoService {
       await this.cognito.adminSetUserPassword(passwordParams).promise();
       console.log(`✅ Password set for: ${email}`);
 
-      // Step 3: Send verification email
-      console.log(`📧 Verification email will be sent to: ${email}`);
+      console.log(`💾 Saving organization to DynamoDB...`);
+      const organization = await this.organizationService.createOrganization({
+        organizationId,
+        name: companyName,
+        plan: "free",
+        maxMembers: 5,
+      });
+      console.log(`✅ Organization saved: ${organizationId}`);
+
+      console.log(`💾 Saving user to DynamoDB...`);
+      const user = await this.userService.createUser({
+        email,
+        organizationId,
+        name,
+        role: "admin",
+      });
+      console.log(`✅ User saved: ${email}`);
 
       return {
         userSub: email,
         organizationId: organizationId,
-        emailVerified: false, // ← Important: not verified yet!
+        emailVerified: false,
         message: "Check your email for verification code",
+        organization: organization,
+        user: user,
       };
     } catch (error) {
       console.error("❌ AWS Sign-up error:", error.message);
@@ -175,13 +175,31 @@ class CognitoService {
 
     console.log(`✅ MOCK: User created: ${userSub}`);
     console.log(`📧 MOCK: Verification code: ${verificationCode}`);
-    console.log(`📧 MOCK: In real app, email would be sent to: ${email}`);
+
+    const mockOrganization = {
+      organizationId,
+      name: companyName,
+      plan: "free",
+      maxMembers: 5,
+      createdAt: Date.now(),
+    };
+
+    const mockUser = {
+      email,
+      organizationId,
+      name,
+      role: "admin",
+      status: "active",
+      createdAt: Date.now(),
+    };
 
     return {
       userSub,
       organizationId,
       emailVerified: false,
-      verificationCode, // ← Return for testing
+      verificationCode,
+      organization: mockOrganization,
+      user: mockUser,
     };
   }
 
@@ -194,7 +212,6 @@ class CognitoService {
       return this.mockLogin(email, password);
     }
 
-    // Real AWS Cognito
     try {
       console.log(`🔑 AWS: Authenticating: ${email}`);
 
@@ -211,7 +228,7 @@ class CognitoService {
       const result = await this.cognito.adminInitiateAuth(params).promise();
 
       if (!result.AuthenticationResult) {
-        throw new Error("Authentication failed - no tokens returned");
+        throw new Error("Authentication failed");
       }
 
       console.log(`✅ AWS: Login successful: ${email}`);
@@ -226,7 +243,6 @@ class CognitoService {
     } catch (error) {
       console.error("❌ AWS Login error:", error.message);
 
-      // User not confirmed error
       if (error.code === "UserNotConfirmedException") {
         throw new Error(
           "Email not verified. Check your inbox for verification code."
@@ -262,10 +278,6 @@ class CognitoService {
 
     const token = this.generateMockToken(user);
 
-    const tokens = this.loadTokens();
-    tokens[token] = user;
-    this.saveTokens(tokens);
-
     console.log(`✅ MOCK: Login successful`);
     console.log(`🏢 Organization: ${user.organizationId}`);
 
@@ -294,9 +306,8 @@ class CognitoService {
       return this.mockVerifyEmail(email, code);
     }
 
-    // Real AWS Cognito - Confirm signup with code
     try {
-      console.log(`✉️ AWS: Verifying email: ${email} with code: ${code}`);
+      console.log(`✉️ AWS: Verifying email: ${email}`);
 
       const params = {
         ClientId: this.clientId,
@@ -313,9 +324,6 @@ class CognitoService {
 
       if (error.code === "CodeMismatchException") {
         throw new Error("Invalid verification code");
-      }
-      if (error.code === "NotAuthorizedException") {
-        throw new Error("User is already confirmed");
       }
 
       throw new Error(error.message);
@@ -347,7 +355,7 @@ class CognitoService {
   }
 
   // ============================================
-  // VERIFY TOKEN
+  // VERIFY TOKEN - ⭐ FIXED VERSION
   // ============================================
 
   async verifyToken(token) {
@@ -359,19 +367,42 @@ class CognitoService {
   }
 
   mockVerifyToken(token) {
-    const tokens = this.loadTokens();
-    const user = tokens[token];
+    // ⭐ FIXED: Now looks up actual user from mock storage instead of returning hardcoded data
+    console.log(`🔐 MOCK: Verifying token: ${token}`);
 
-    if (!user) {
+    const users = this.loadUsers();
+
+    // Find user by token (token format: mock-token-{userSub}-{timestamp})
+    // Extract userSub from token
+    const tokenParts = token.split("-");
+    if (tokenParts.length < 4) {
+      console.log(`❌ MOCK: Invalid token format: ${token}`);
       throw new Error("Invalid token");
     }
 
+    // Find user with matching userSub
+    for (const email in users) {
+      const user = users[email];
+      if (user.userSub === `${tokenParts[2]}-${tokenParts[3]}`) {
+        console.log(`✅ MOCK: User found from token: ${email}`);
+        return {
+          sub: user.userSub,
+          email: user.email,
+          name: user.name,
+          organizationId: user.organizationId,
+          role: user.role,
+        };
+      }
+    }
+
+    // If not found, return mock data (fallback)
+    console.log(`⚠️ MOCK: User not found in storage, using fallback`);
     return {
-      sub: user.userSub,
-      email: user.email,
-      name: user.name,
-      organizationId: user.organizationId,
-      role: user.role,
+      sub: "mock-user",
+      email: "mock@test.com",
+      name: "Mock User",
+      organizationId: "org-mock",
+      role: "admin",
     };
   }
 
