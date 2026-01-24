@@ -244,16 +244,16 @@ curl https://YOUR_API_ID.execute-api.ap-south-1.amazonaws.com/api/health
 ## 📚 **Documentation**
 
 ### **Core Documentation**
-- 📖 [**Architecture Overview**](./docs/ARCHITECTURE.md) - Complete system design
-- 🔄 [**Architecture Diagrams**](./docs/ARCHITECTURE_DIAGRAMS.md) - Visual flowcharts
-- 🗄️ [**Database Design**](./docs/DATABASE_DESIGN.md) - Schema & indexing
-- 🔌 [**API Documentation**](./docs/API_DOCUMENTATION.md) - All 23 endpoints
-- 🚀 [**Deployment Guide**](./docs/DEPLOYMENT_GUIDE.md) - Step-by-step setup
-- 💰 [**Cost Analysis**](./docs/COST_ANALYSIS.md) - Why $0/month
+- 📖 [**Architecture Overview**](./ARCHITECTURE.md) - Complete system design
+- 🔄 [**Architecture Diagrams**](./ARCHITECTURE_DIAGRAMS.md) - Visual flowcharts
+- 🗄️ [**Database Design**](./DATABASE_DESIGN.md) - Schema & indexing
+- 🔌 [**API Documentation**](./API_DOCUMENTATION.md) - All 23 endpoints
+- 🚀 [**Deployment Guide**](./DEPLOYMENT_GUIDE.md) - Step-by-step setup
+- 💰 [**Cost Analysis**](./COST_ANALYSIS.md) - Why $0/month
 
 ### **User Journeys**
-- 👤 [**Single User Journey**](./docs/USER_JOURNEY_SINGLE.md) - Individual developer flow
-- 🏢 [**Multi-Tenant Journey**](./docs/USER_JOURNEY_MULTI_TENANT.md) - Team/organization flow
+- 👤 [**Single User Journey**](./USER_JOURNEY_SINGLE.md) - Individual developer flow
+- 🏢 [**Multi-Tenant Journey**](./USER_JOURNEY_MULTI_TENANT.md) - Team/organization flow
 
 ---
 
@@ -285,7 +285,7 @@ DELETE /team/member/{userId}                 # Remove member
 PUT    /team/member/{userId}/role            # Update role
 ```
 
-**Full API Reference**: [API Documentation](./docs/API_DOCUMENTATION.md)
+**Full API Reference**: [API Documentation](./API_DOCUMENTATION.md)
 
 ---
 
@@ -386,7 +386,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 - ✅ Audit trails for all operations
 - ✅ User data deletion on request
 
-**Security Details**: [Architecture Documentation](./docs/ARCHITECTURE.md#security)
+**Security Details**: [Architecture Documentation](./ARCHITECTURE.md#security)
 
 ---
 
@@ -407,7 +407,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 - ✅ **No capacity planning**: AWS handles all scaling
 - ✅ **Geographic distribution**: Multi-region support
 
-**Read More**: [Scalability Architecture](./docs/ARCHITECTURE.md#scalability)
+**Read More**: [Scalability Architecture](./ARCHITECTURE.md#scalability)
 
 ---
 
@@ -436,7 +436,7 @@ Monthly Costs:
 - Cost: $3,500/month
 - **Margin: 99.97%** 🚀
 
-**Detailed Breakdown**: [Cost Analysis](./docs/COST_ANALYSIS.md)
+**Detailed Breakdown**: [Cost Analysis](./COST_ANALYSIS.md)
 
 ---
 
@@ -635,9 +635,9 @@ Open to Contributions: Yes
 |----------|------|
 | **Live API** | [https://your-api-id.execute-api.ap-south-1.amazonaws.com](https://your-api-id.execute-api.ap-south-1.amazonaws.com) |
 | **Documentation** | [/docs](./docs) |
-| **Architecture** | [ARCHITECTURE.md](./docs/ARCHITECTURE.md) |
-| **API Docs** | [API_DOCUMENTATION.md](./docs/API_DOCUMENTATION.md) |
-| **Deployment** | [DEPLOYMENT_GUIDE.md](./docs/DEPLOYMENT_GUIDE.md) |
+| **Architecture** | [ARCHITECTURE.md](./ARCHITECTURE.md) |
+| **API Docs** | [API_DOCUMENTATION.md](./API_DOCUMENTATION.md) |
+| **Deployment** | [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) |
 | **Issues** | [GitHub Issues](https://github.com/yourusername/devinsights-ai/issues) |
 | **Discussions** | [GitHub Discussions](https://github.com/yourusername/devinsights-ai/discussions) |
 
